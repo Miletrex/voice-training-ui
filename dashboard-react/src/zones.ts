@@ -20,7 +20,7 @@ export const BUTTER = "#ffe9a8"; // neutral / mid
 export const GROW = "#cdc6da";
 
 export const PITCH_ZONES: Zone[] = [
-  { from: 100, to: 145, color: MASC, name: "masc" },
+  { from: 0, to: 145, color: MASC, name: "masc" },
   { from: 145, to: 165, color: BUTTER, name: "neutral" },
   { from: 165, to: 260, color: FEM, name: "fem" },
 ];

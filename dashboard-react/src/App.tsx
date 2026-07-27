@@ -45,6 +45,183 @@ export function App() {
     null,
   );
 
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [availableFiles, setAvailableFiles] = useState<string[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string>("");
+
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [timerId, setTimerId] = useState<number | null>(null);
+
+  // 🔴 NEU: Funktion startet die Mikrofonaufnahme
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Nutzt Standard-Audioaufzeichnung des Browsers
+      const recorder = new MediaRecorder(stream);
+      const audioChunks: Blob[] = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunks.push(event.data);
+      };
+
+      recorder.onstop = async () => {
+        // Verbindet alle aufgenommenen Tonschnipsel zu einer Datei
+        const audioBlob = new Blob(audioChunks, { type: "audio/wav" });
+        
+        // Verpackt die Datei für den HTTP-Versand
+        const formData = new FormData();
+        formData.append("file", audioBlob);
+
+        try {
+          const response = await fetch("http://localhost:8000/api/upload-recording", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!response.ok) throw new Error("Upload fehlgeschlagen");
+          
+          const result = await response.json();
+          // Automatische Vorauswahl der frisch aufgenommenen Datei im Dropdown
+          setSelectedFile(result.filename);
+        } catch (err) {
+          alert("Fehler beim Übertragen der Aufnahme: " + String(err));
+        }
+
+        // Mikrofon-Stream wieder sauber schließen
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+      setRecordingSeconds(0);
+
+      // Kleiner visueller Timer für die Aufnahmezeit
+      const interval = window.setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1);
+      }, 1000);
+      setTimerId(interval);
+
+    } catch (err) {
+      alert("Mikrofon-Zugriff verweigert oder nicht verfügbar: " + String(err));
+    }
+  };
+
+  // 🔴 NEU: Funktion stoppt die Aufnahme
+  const stopRecording = () => {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+      setIsRecording(false);
+      if (timerId) {
+        clearInterval(timerId);
+        setTimerId(null);
+      }
+    }
+  };
+
+  // FUNCTION: Lädt die Aufnahmen frisch und sortiert sie
+  const loadRecordingsSilently = () => {
+    fetch(`${import.meta.env.BASE_URL}recordings.json?t=${Date.now()}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data: Recording[]) => {
+        // Nur den State aktualisieren, wenn sich die Anzahl oder Daten wirklich geändert haben
+        setRecordings((prev) => {
+          if (JSON.stringify(prev) !== JSON.stringify(data)) {
+            return [...data].sort((a, b) => a.id - b.id);
+          }
+          return prev;
+        });
+      })
+      .catch((e) => setError(String(e)));
+  };
+
+  // FUNCTION: Lädt die Dateiliste aus dem shared-Ordner
+  const loadFilesSilently = () => {
+    fetch("http://localhost:8000/api/files")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((files: string[]) => {
+        setAvailableFiles((prev) => {
+          // Nur aktualisieren bei echten Änderungen im Ordner
+          if (JSON.stringify(prev) !== JSON.stringify(files)) {
+            // Falls vorher nichts ausgewählt war, nimm die erste neue Datei
+            if (!selectedFile && files.length > 0) {
+              setSelectedFile(files[0]);
+            }
+            return files;
+          }
+          return prev;
+        });
+      })
+      .catch(() => setAvailableFiles([]));
+  };
+
+  // 🔴 AUTOMATISCHER SYNC 1: Alle 5 Sekunden die Aufnahmen im Hintergrund prüfen
+  useEffect(() => {
+    loadRecordingsSilently(); // Erstmaliger Aufruf beim Start
+    const interval = setInterval(loadRecordingsSilently, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 🔴 AUTOMATISCHER SYNC 2: Alle 3 Sekunden den shared-Ordner nach neuen MP3s scannen
+  useEffect(() => {
+    loadFilesSilently(); // Erstmaliger Aufruf beim Start
+    const interval = setInterval(loadFilesSilently, 3000);
+    return () => clearInterval(interval);
+  }, [selectedFile]);
+
+  const handleStartAnalysis = async () => {
+    if (!selectedFile) {
+      alert("Bitte wählen Sie zuerst eine Audio-Datei aus! 🌧️");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    try {
+      const response = await fetch("http://localhost:8000/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: selectedFile, // 🔴 Dynamischer Wert aus dem State
+          label: `Analysis: ${selectedFile.split('.')[0]}`, // Automatisches Label aus Dateinamen
+          note: "Gestartet über Web-Dropdown",
+          register_floor: 130
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.detail || "Fehler beim Analysieren");
+      }
+
+      const freshRes = await fetch(`${import.meta.env.BASE_URL}recordings.json?t=${Date.now()}`);
+      const data = await freshRes.json();
+      setRecordings([...data].sort((a, b) => a.id - b.id));
+
+    } catch (e) {
+      alert(`Fehler: ${String(e)}`);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  /** 
+  useEffect(() => {
+    fetch("http://localhost:8000/api/files")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((files: string[]) => {
+        setAvailableFiles(files);
+        if (files.length > 0) {
+          setSelectedFile(files[0]); // Erste Datei als Standard vorauswählen
+        }
+      })
+      .catch(() => setAvailableFiles([]));
+  }, []);
+
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}recordings.json?t=${Date.now()}`)
       .then((res) => {
@@ -56,6 +233,7 @@ export function App() {
       )
       .catch((e) => setError(String(e)));
   }, []);
+  
 
   // reference voices (real men/women) — degrade gracefully if missing.
   useEffect(() => {
@@ -66,6 +244,7 @@ export function App() {
       )
       .catch(() => setReferences([]));
   }, []);
+  */
 
   const openModal = (key: MetricKey, rect: DOMRect) => setModal({ key, rect });
 
@@ -87,6 +266,78 @@ export function App() {
           <TulipIcon title="Voice Garden" /> Voice Garden
         </h1>
         <p>a cozy place to watch your voice bloom 🌱✨</p>
+        
+        {/* 🔴 NEU: Aufnahme-Steuerung im Header */}
+        <div style={{ marginTop: "20px", display: "flex", gap: "15px", flexWrap: "wrap", justifyContent: "center" }}>
+          
+          {/* MIKROFON-BUTTON */}
+          <div style={{ 
+            background: "rgba(255, 255, 255, 0.05)", 
+            padding: "15px", 
+            borderRadius: "12px",
+            display: "inline-flex",
+            gap: "10px",
+            alignItems: "center"
+          }}>
+            <button
+              onClick={isRecording ? stopRecording : startRecording}
+              style={{
+                padding: "10px 20px",
+                cursor: "pointer",
+                background: isRecording ? "#ff4d4d" : "#4caf50",
+                color: "#fff",
+                border: "none",
+                borderRadius: "6px",
+                fontWeight: "bold",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px"
+              }}
+            >
+              {isRecording ? (
+                <>🔴 Stop Recording ({recordingSeconds}s)</>
+              ) : (
+                <>🎙️ Record with Mic</>
+              )}
+            </button>
+          </div>
+
+          {/* DATEIAUSWAHL & ANALYSE-TRIGGER (Bestehendes Layout, leicht angepasst) */}
+          <div style={{ 
+            background: "rgba(255, 255, 255, 0.05)", 
+            padding: "15px", 
+            borderRadius: "12px",
+            display: "inline-flex",
+            gap: "10px",
+            alignItems: "center"
+          }}>
+            <label style={{ fontSize: "0.9rem", color: "#9d8ba8" }}>Select Audio:</label>
+            <select 
+              value={selectedFile} 
+              onChange={(e) => setSelectedFile(e.target.value)}
+              disabled={isAnalyzing || availableFiles.length === 0}
+              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #9d8ba8", background: "#1e1e24", color: "#fff", cursor: "pointer" }}
+            >
+              {availableFiles.length === 0 ? (
+                <option value="">No files found in shared folder 📁</option>
+              ) : (
+                availableFiles.map((file) => (
+                  <option key={file} value={file}>{file}</option>
+                ))
+              )}
+            </select>
+
+            <button 
+              onClick={handleStartAnalysis} 
+              disabled={isAnalyzing || !selectedFile || isRecording}
+              style={{ padding: "8px 16px", cursor: "pointer", background: isAnalyzing ? "#555" : "#9d8ba8", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold" }}
+            >
+              {isAnalyzing ? "Analyzing... ⏳" : "Run Analysis 🛠️"}
+            </button>
+          </div>
+
+        </div>
+
         {active && (
           <div className="latest-banner">
             🌸 <b>#{active.id}</b> &middot; {active.label} &middot;{" "}
