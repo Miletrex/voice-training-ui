@@ -44,7 +44,7 @@ export function AnnotationsProvider({
   initialDetail = null,
   initialAnn = null,
 }: {
-  recording: Recording;
+  recording?: Recording;
   children: ReactNode;
   // Optional pre-loaded data — lets callers (e.g. tests or static previews)
   // inject the detail/annotations synchronously instead of fetching. When
@@ -52,6 +52,40 @@ export function AnnotationsProvider({
   initialDetail?: RecordingDetail | null;
   initialAnn?: RecordingAnnotations | null;
 }) {
+  const safeRecording: Recording = {
+    id: 0,
+    label: "Loading",
+    note: "",
+    date: "",
+    source_file: "",
+    audio: null,
+    duration_s: null,
+    pitch: {
+      mean_hz: null,
+      median_hz: null,
+      min_hz: null,
+      max_hz: null,
+      range_hz: null,
+      sd_hz: null,
+    },
+    formants: {
+      f1_hz: null,
+      f2_hz: null,
+      f3_hz: null,
+    },
+    voice_quality: {
+      hnr_db: null,
+      jitter_pct: null,
+      shimmer_pct: null,
+    },
+    intensity: {
+      mean_db: null,
+      min_db: null,
+      max_db: null,
+    },
+  };
+  const activeRecording = recording ?? safeRecording;
+
   const [detail, setDetail] = useState<RecordingDetail | null>(initialDetail);
   const [ann, setAnn] = useState<RecordingAnnotations | null>(initialAnn);
 
@@ -59,23 +93,23 @@ export function AnnotationsProvider({
     // No detail to fetch (or none configured): fall back to the injected
     // value (null in the app — clears any stale detail; non-null only when a
     // caller pre-loaded it, e.g. a static preview).
-    if (!recording.detail) {
+    if (!activeRecording.detail) {
       setDetail(initialDetail);
       return;
     }
     setDetail(null);
     let alive = true;
-    fetch(`${import.meta.env.BASE_URL}${recording.detail}?t=${Date.now()}`)
+    fetch(`${import.meta.env.BASE_URL}${activeRecording.detail}?t=${Date.now()}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((d: RecordingDetail) => alive && setDetail(d))
       .catch(() => alive && setDetail(null));
     return () => {
       alive = false;
     };
-  }, [recording.detail, initialDetail]);
+  }, [activeRecording.detail, initialDetail]);
 
   useEffect(() => {
-    const key = `./entries/${String(recording.id).padStart(3, "0")}.tsx`;
+    const key = `./entries/${String(activeRecording.id).padStart(3, "0")}.tsx`;
     const loader = entries[key];
     // No entry module: fall back to the injected annotations (null in the
     // app — clears any stale annotations; non-null only when pre-loaded).
@@ -92,10 +126,10 @@ export function AnnotationsProvider({
     return () => {
       alive = false;
     };
-  }, [recording.id, initialAnn]);
+  }, [activeRecording.id, initialAnn]);
 
   return (
-    <AnnCtx.Provider value={{ recording, detail, ann }}>
+    <AnnCtx.Provider value={{ recording: activeRecording, detail, ann }}>
       {children}
     </AnnCtx.Provider>
   );

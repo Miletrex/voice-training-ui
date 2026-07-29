@@ -55,6 +55,7 @@ export function App() {
   const [timerId, setTimerId] = useState<number | null>(null);
   const [customFilename, setCustomFilename] = useState<string>("");
   const [autoAnalyse, setAutoAnalyse] = useState<boolean>(true);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
   // 🔴 NEU: Funktion startet die Mikrofonaufnahme
   const startRecording = async () => {
@@ -133,21 +134,30 @@ export function App() {
 
   // FUNCTION: Lädt die Aufnahmen frisch und sortiert sie
   const loadRecordingsSilently = () => {
-    fetch(`${import.meta.env.BASE_URL}recordings.json?t=${Date.now()}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data: Recording[]) => {
-        // Nur den State aktualisieren, wenn sich die Anzahl oder Daten wirklich geändert haben
-        setRecordings((prev) => {
-          if (JSON.stringify(prev) !== JSON.stringify(data)) {
-            return [...data].sort((a, b) => a.id - b.id);
-          }
-          return prev;
-        });
-      })
-      .catch((e) => setError(String(e)));
+  fetch(`${import.meta.env.BASE_URL}recordings.json?t=${Date.now()}`)
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    })
+    .then((data: Recording[]) => {
+      const sortedData = [...data].sort((a, b) => a.id - b.id);
+      
+      setRecordings((prev) => {
+        if (JSON.stringify(prev) !== JSON.stringify(data)) {
+          return sortedData;
+        }
+        return prev;
+      });
+
+      // 🟢 Automatically select the newest recording ID on app start
+      setSelectedId((prevId) => {
+        if (prevId === null && sortedData.length > 0) {
+          return sortedData[sortedData.length - 1].id; // Select newest
+        }
+        return prevId; // Keep user selection if it exists
+      });
+    })
+    .catch((e) => setError(String(e)));
   };
 
   // FUNCTION: Lädt die Dateiliste aus dem shared-Ordner
@@ -155,19 +165,30 @@ export function App() {
     fetch("http://localhost:8000/api/files")
       .then((res) => (res.ok ? res.json() : []))
       .then((files: string[]) => {
+        const nextFiles = Array.isArray(files) ? files : [];
+
         setAvailableFiles((prev) => {
           // Nur aktualisieren bei echten Änderungen im Ordner
-          if (JSON.stringify(prev) !== JSON.stringify(files)) {
-            // Falls vorher nichts ausgewählt war, nimm die erste neue Datei
-            if (!selectedFile && files.length > 0) {
-              setSelectedFile(files[0]);
-            }
-            return files;
+          if (JSON.stringify(prev) !== JSON.stringify(nextFiles)) {
+            return nextFiles;
           }
           return prev;
         });
+
+        setSelectedFile((prev) => {
+          if (prev && nextFiles.includes(prev)) {
+            console.log("Selected file still exists, keeping it:", prev);
+            return prev;
+          }
+          console.log("Selected file not found, defaulting to last available file.");
+          return nextFiles[nextFiles.length - 1] ?? "";
+        });
       })
-      .catch(() => setAvailableFiles([]));
+      .catch(() => {
+        console.error("Fehler beim Abrufen der Dateiliste");
+        setAvailableFiles([]);
+        setSelectedFile((prev) => (prev ? prev : ""));
+      });
   };
 
   // 🔴 AUTOMATISCHER SYNC 1: Alle 5 Sekunden die Aufnahmen im Hintergrund prüfen
@@ -182,15 +203,20 @@ export function App() {
     loadFilesSilently(); // Erstmaliger Aufruf beim Start
     const interval = setInterval(loadFilesSilently, 3000);
     return () => clearInterval(interval);
-  }, [selectedFile]);
+  }, []);
 
   const handleStartAnalysis = async (overrideFilename?: string) => {
-    const fileToAnalyze = overrideFilename || selectedFile;
+    const fileToAnalyze = overrideFilename ?? selectedFile;
+    console.log('selectedFile: ', selectedFile);
+    console.log('filename: ', fileToAnalyze);
+    console.log('overrideFilename: ', overrideFilename);
 
     if (!fileToAnalyze) {
-      alert("Bitte wählen Sie zuerst eine Audio-Datei aus! 🌧️");
+      alert("Please select an audio file first! 🌧️");
       return;
     }
+
+    setSelectedFile(fileToAnalyze);
 
     setIsAnalyzing(true);
     try {
@@ -199,8 +225,8 @@ export function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           filename: fileToAnalyze,
-          label: `Analysis: ${fileToAnalyze.split('.')[0]}`,
-          note: overrideFilename ? "Automatisch nach Aufnahme gestartet" : "Gestartet über Web-Dropdown",
+          label: `Analysis: ${fileToAnalyze}`,
+          note: overrideFilename ? "Automatically started after recording" : "Started via Web-Dropdown",
           register_floor: 130
         })
       });
@@ -240,7 +266,125 @@ export function App() {
     R.map((r) => ({ label: r.id, y: sel(r) }));
 
   return (
-    <div className="wrap">
+    <AnnotationsProvider recording={active ?? undefined}>
+      <div
+        style={{
+          position: "fixed",
+          bottom: 24,
+          right: 24,
+          zIndex: 1000,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-end",
+          gap: 12,
+        }}
+      >
+        {isSettingsOpen && (
+          <div
+            style={{
+              width: 260,
+              padding: 16,
+              borderRadius: 16,
+              background: "rgba(255,255,255,0.96)",
+              border: "1px solid #eadff3",
+              boxShadow: "0 12px 32px rgba(0,0,0,0.16)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: "#5f556d" }}>
+              Settings
+            </h3>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#8a7f98", marginBottom: 6 }}>
+                Put your chosen name here ✨
+              </label>
+              <input
+                type="text"
+                value={customFilename}
+                onChange={(e) => setCustomFilename(e.target.value)}
+                placeholder="Name eingeben..."
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #d7cde4",
+                  fontSize: 14,
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#8a7f98" }}>
+                Auto-Analyze after recording 🔍
+              </span>
+              <label style={{ position: "relative", display: "inline-flex", alignItems: "center", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={autoAnalyse}
+                  onChange={(e) => setAutoAnalyse(e.target.checked)}
+                  style={{ position: "absolute", opacity: 0, pointerEvents: "none" }}
+                />
+                <span
+                  style={{
+                    width: 36,
+                    height: 20,
+                    borderRadius: 999,
+                    background: autoAnalyse ? "#9d8ba8" : "#d8d0e2",
+                    transition: "background 0.2s ease",
+                    display: "inline-block",
+                    position: "relative",
+                  }}
+                >
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: 2,
+                      left: autoAnalyse ? 18 : 2,
+                      width: 16,
+                      height: 16,
+                      borderRadius: "50%",
+                      background: "#fff",
+                      transition: "left 0.2s ease",
+                    }}
+                  />
+                </span>
+              </label>
+            </div>
+          </div>
+        )}
+
+        <button
+          onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+          title="Einstellungen öffnen"
+          style={{
+            width: 54,
+            height: 54,
+            border: "none",
+            borderRadius: "50%",
+            background: isSettingsOpen ? "#4f4862" : "#9d8ba8",
+            color: "#fff",
+            boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {isSettingsOpen ? (
+            <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          )}
+        </button>
+      </div>
+
+      <div className="wrap">
       <header className="hero">
         <h1>
           <TulipIcon title="Voice Garden" /> Voice Garden
@@ -260,15 +404,6 @@ export function App() {
             gap: "10px",
             alignItems: "center"
           }}>
-            <input
-            type="text"
-            placeholder="Put your chosen name here ✨"
-            value={customFilename}
-            onChange={(e) => setCustomFilename(e.target.value)}
-            disabled={isRecording}
-            className="filename-input"
-            style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #ccc", width: "250px", fontSize: "14px" }}
-          />
             <button
               onClick={isRecording ? stopRecording : startRecording}
               style={{
@@ -321,21 +456,12 @@ export function App() {
             </select>
 
             <button 
-              onClick={handleStartAnalysis} 
+              onClick={() => handleStartAnalysis()}
               disabled={isAnalyzing || !selectedFile || isRecording}
               style={{ padding: "8px 16px", cursor: "pointer", background: isAnalyzing ? "#555" : "#9d8ba8", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold" }}
             >
               {isAnalyzing ? "Analyzing... ⏳" : "Run Analysis 🛠️"}
             </button>
-            <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "14px", cursor: "pointer", userSelect: "none" }}>
-            <input
-              type="checkbox"
-              checked={autoAnalyse}
-              onChange={(e) => setAutoAnalyse(e.target.checked)}
-              style={{ cursor: "pointer" }}
-            />
-            Auto-Analyze after recording 🔍
-          </label>
           </div>
 
         </div>
@@ -652,6 +778,7 @@ export function App() {
         />
       )}
     </div>
+    </AnnotationsProvider>
   );
 }
 
