@@ -26,6 +26,33 @@ import time
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 
 
+@app.delete("/api/recordings/{filename}")
+async def delete_recording(filename: str):
+    shared_dir = "/app/shared"
+    file_path = os.path.join(shared_dir, filename)
+    
+    # Sicherheitscheck: Verhindert Path Traversal Attacken (z.B. filename="../../etc/passwd")
+    real_path = os.path.abspath(file_path)
+    if not real_path.startswith(os.path.abspath(shared_dir)):
+        raise HTTPException(status_code=400, detail="Ungültiger Dateipfad.")
+        
+    # Prüfen, ob die Datei existiert
+    if not os.path.exists(real_path):
+        raise HTTPException(status_code=404, detail=f"Datei {filename} wurde nicht gefunden.")
+        
+    # Prüfen, ob es sich wirklich um eine Datei handelt (und kein Unterverzeichnis)
+    if not os.path.isfile(real_path):
+        raise HTTPException(status_code=400, detail="Der angegebene Pfad ist keine Datei.")
+
+    try:
+        os.remove(real_path)
+        print(f"Erfolgreich gelöscht: {filename}", flush=True)
+        return {"status": "success", "message": f"Datei {filename} wurde erfolgreich gelöscht."}
+    except Exception as e:
+        print(f"Fehler beim Löschen von {filename}: {str(e)}", flush=True)
+        raise HTTPException(status_code=500, detail=f"Fehler beim Löschen der Datei: {str(e)}")
+
+
 @app.post("/api/upload-recording")
 async def upload_recording(file: UploadFile = File(...), filename: str = Form(None)):
     shared_dir = "/app/shared"
