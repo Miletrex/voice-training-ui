@@ -20,8 +20,11 @@ Install Docker first:
   - Linux Distros: https://docs.docker.com/engine/install/
 
 git clone https://github.com/Miletrex/voice-training-ui.git
+
 docker build -t voice-trainer .
+
 docker run -d -p 8080:5173 -p 8000:8000 -v <path-to-folder>/voice-training-ui/recordings:/app/shared --name voice-trainer voice-trainer
+
 http://localhost:8080/ 
 
 ## License
