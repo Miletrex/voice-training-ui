@@ -27,3 +27,6 @@ voice-garden-starter.zip
 
 # reference-build audio cache (regenerate via scripts/build_reference_set.py)
 .refcache/
+
+recordings/*
+dashboard-react/public/*
