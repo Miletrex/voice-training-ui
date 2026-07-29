@@ -53,6 +53,8 @@ export function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [timerId, setTimerId] = useState<number | null>(null);
+  const [customFilename, setCustomFilename] = useState<string>("");
+  const [autoAnalyse, setAutoAnalyse] = useState<boolean>(true);
 
   // 🔴 NEU: Funktion startet die Mikrofonaufnahme
   const startRecording = async () => {
@@ -74,6 +76,10 @@ export function App() {
         const formData = new FormData();
         formData.append("file", audioBlob);
 
+        if (customFilename.trim()) {
+          formData.append("filename", customFilename.trim());
+        }
+
         try {
           const response = await fetch("http://localhost:8000/api/upload-recording", {
             method: "POST",
@@ -85,6 +91,10 @@ export function App() {
           const result = await response.json();
           // Automatische Vorauswahl der frisch aufgenommenen Datei im Dropdown
           setSelectedFile(result.filename);
+
+          if (autoAnalyse) {
+            handleStartAnalysis(result.filename);
+          }
         } catch (err) {
           alert("Fehler beim Übertragen der Aufnahme: " + String(err));
         }
@@ -174,8 +184,10 @@ export function App() {
     return () => clearInterval(interval);
   }, [selectedFile]);
 
-  const handleStartAnalysis = async () => {
-    if (!selectedFile) {
+  const handleStartAnalysis = async (overrideFilename?: string) => {
+    const fileToAnalyze = overrideFilename || selectedFile;
+
+    if (!fileToAnalyze) {
       alert("Bitte wählen Sie zuerst eine Audio-Datei aus! 🌧️");
       return;
     }
@@ -186,9 +198,9 @@ export function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          filename: selectedFile, // 🔴 Dynamischer Wert aus dem State
-          label: `Analysis: ${selectedFile.split('.')[0]}`, // Automatisches Label aus Dateinamen
-          note: "Gestartet über Web-Dropdown",
+          filename: fileToAnalyze,
+          label: `Analysis: ${fileToAnalyze.split('.')[0]}`,
+          note: overrideFilename ? "Automatisch nach Aufnahme gestartet" : "Gestartet über Web-Dropdown",
           register_floor: 130
         })
       });
@@ -200,7 +212,12 @@ export function App() {
 
       const freshRes = await fetch(`${import.meta.env.BASE_URL}recordings.json?t=${Date.now()}`);
       const data = await freshRes.json();
-      setRecordings([...data].sort((a, b) => a.id - b.id));
+      const sortedData = [...data].sort((a, b) => Number(a.id) - Number(b.id));
+      setRecordings(sortedData);
+      if (sortedData.length > 0) {
+        const newestRecording = sortedData[sortedData.length - 1];
+        setSelectedId(newestRecording.id); 
+      } 
 
     } catch (e) {
       alert(`Fehler: ${String(e)}`);
@@ -208,43 +225,6 @@ export function App() {
       setIsAnalyzing(false);
     }
   };
-
-  /** 
-  useEffect(() => {
-    fetch("http://localhost:8000/api/files")
-      .then((res) => (res.ok ? res.json() : []))
-      .then((files: string[]) => {
-        setAvailableFiles(files);
-        if (files.length > 0) {
-          setSelectedFile(files[0]); // Erste Datei als Standard vorauswählen
-        }
-      })
-      .catch(() => setAvailableFiles([]));
-  }, []);
-
-  useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}recordings.json?t=${Date.now()}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data: Recording[]) =>
-        setRecordings([...data].sort((a, b) => a.id - b.id)),
-      )
-      .catch((e) => setError(String(e)));
-  }, []);
-  
-
-  // reference voices (real men/women) — degrade gracefully if missing.
-  useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}reference.json?t=${Date.now()}`)
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data: ReferenceVoice[]) =>
-        setReferences(Array.isArray(data) ? data : []),
-      )
-      .catch(() => setReferences([]));
-  }, []);
-  */
 
   const openModal = (key: MetricKey, rect: DOMRect) => setModal({ key, rect });
 
@@ -270,6 +250,7 @@ export function App() {
         {/* 🔴 NEU: Aufnahme-Steuerung im Header */}
         <div style={{ marginTop: "20px", display: "flex", gap: "15px", flexWrap: "wrap", justifyContent: "center" }}>
           
+          
           {/* MIKROFON-BUTTON */}
           <div style={{ 
             background: "rgba(255, 255, 255, 0.05)", 
@@ -279,6 +260,15 @@ export function App() {
             gap: "10px",
             alignItems: "center"
           }}>
+            <input
+            type="text"
+            placeholder="Put your chosen name here ✨"
+            value={customFilename}
+            onChange={(e) => setCustomFilename(e.target.value)}
+            disabled={isRecording}
+            className="filename-input"
+            style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #ccc", width: "250px", fontSize: "14px" }}
+          />
             <button
               onClick={isRecording ? stopRecording : startRecording}
               style={{
@@ -300,7 +290,10 @@ export function App() {
                 <>🎙️ Record with Mic</>
               )}
             </button>
-          </div>
+        </div>
+      </div>
+      
+      <div style={{ marginTop: "20px", display: "flex", gap: "15px", flexWrap: "wrap", justifyContent: "center" }}>
 
           {/* DATEIAUSWAHL & ANALYSE-TRIGGER (Bestehendes Layout, leicht angepasst) */}
           <div style={{ 
@@ -334,6 +327,15 @@ export function App() {
             >
               {isAnalyzing ? "Analyzing... ⏳" : "Run Analysis 🛠️"}
             </button>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "14px", cursor: "pointer", userSelect: "none" }}>
+            <input
+              type="checkbox"
+              checked={autoAnalyse}
+              onChange={(e) => setAutoAnalyse(e.target.checked)}
+              style={{ cursor: "pointer" }}
+            />
+            Auto-Analyze after recording 🔍
+          </label>
           </div>
 
         </div>

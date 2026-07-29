@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import subprocess
 import shutil
@@ -22,18 +23,33 @@ class AnalyzeRequest(BaseModel):
     register_floor: int = 130
 
 import time
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 
 
 @app.post("/api/upload-recording")
-async def upload_recording(file: UploadFile = File(...)):
+async def upload_recording(file: UploadFile = File(...), filename: str = Form(None)):
     shared_dir = "/app/shared"
     timestamp = int(time.time())
+
+    formatted_time = datetime.now().strftime("%H-%M-%S_%d-%m-%Y")
     
     # Temporärer Pfad für die Rohdaten des Browsers
     temp_raw_path = f"/tmp/raw_mic_{timestamp}.tmp"
+
+    if filename:
+        # Entferne eventuell mitgesendete Dateiendungen des Nutzers für ein sauberes .mp3
+        base_name = os.path.splitext(filename)[0]
+        # Bereinige den Namen von unerlaubten Pfad- oder Sonderzeichen
+        base_name = "".join(c for c in base_name if c.isalnum() or c in ("-", "_")).strip()
+    else:
+        base_name = "mic_recording"
+
+    # Falls der bereinigte Name leer sein sollte, Fallback nutzen
+    if not base_name:
+        base_name = "mic_recording"
+
     # Der finale Zielpfad als MP3 im Windows-Ordner
-    final_mp3_name = f"mic_recording_{timestamp}.mp3"
+    final_mp3_name = f"{base_name}_{formatted_time}.mp3"
     final_mp3_path = os.path.join(shared_dir, final_mp3_name)
     
     try:
