@@ -6,7 +6,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     procps \
     ffmpeg \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+ENV TZ=Europe/Berlin
 
 COPY --from=uv_bin /uv /uvx /bin/
 

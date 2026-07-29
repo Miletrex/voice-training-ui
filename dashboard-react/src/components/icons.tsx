@@ -29,6 +29,32 @@ function svgProps(viewBox: string, { size = "1.15em", className, title }: IconPr
   };
 }
 
+/** 🗑️ → a sleek trashcan — "delete recording" */
+export function TrashIcon(p: IconProps = {}) {
+  const { children, ...rest } = svgProps("0 0 64 64", p);
+  return (
+    <svg {...rest}>
+      {children}
+      {/* Auf 64x64 Grid zentriert und perfekt ausbalanciert */}
+      <g transform="translate(32, 32) scale(1.1) translate(-32, -32)">
+        {/* Mülleimer-Deckel Griff */}
+        <path d="M26 14 h12 v-3 a2 2 0 0 0-2-2 H28 a2 2 0 0 0-2 2 v3 z" fill="#ff89bb" />
+        
+        {/* Mülleimer-Deckel */}
+        <rect x="14" y="14" width="36" height="4" rx="2" fill="#ff9ec5" />
+        
+        {/* Hauptkorpus des Mülleimers */}
+        <path d="M18 20 L21 51 a4 4 0 0 0 4 3 h18 a4 4 0 0 0 4 -3 L50 20 Z" fill="#ffb6d5" />
+        
+        {/* Vertikale Design-Streifen für Struktur */}
+        <rect x="25" y="26" width="3" height="20" rx="1.5" fill="#ff89bb" opacity="0.8" />
+        <rect x="30.5" y="26" width="3" height="20" rx="1.5" fill="#ff89bb" opacity="0.8" />
+        <rect x="36" y="26" width="3" height="20" rx="1.5" fill="#ff89bb" opacity="0.8" />
+      </g>
+    </svg>
+  );
+}
+
 /** 🎀 → a soft pink bow — "this take" */
 export function BowIcon(p: IconProps = {}) {
   const { children, ...rest } = svgProps("0 0 64 64", p);

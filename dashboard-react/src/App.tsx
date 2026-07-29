@@ -33,6 +33,7 @@ import {
   TrendsIcon,
   CardsIcon,
   BulbIcon,
+  TrashIcon,
 } from "./components/icons";
 
 export function App() {
@@ -252,6 +253,51 @@ export function App() {
     }
   };
 
+  const handleDeleteFile = async (filename: string, confirm: boolean = true) => {
+  // Optional: Add a confirmation dialog so users don't accidently delete files
+  if (confirm && !window.confirm(`Are you sure you want to delete ${filename}?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`http://localhost:8000/api/recordings/${encodeURIComponent(filename)}`, {
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to delete the file on the server.");
+    }
+
+    // Update the frontend state to remove the file from the UI list
+    setAvailableFiles((prevFiles) => prevFiles.filter((file) => file !== filename));
+    
+    // Clear selection if the deleted file was currently selected
+    if (selectedFile === filename) {
+      setSelectedFile("");
+    }
+    loadRecordingsSilently();
+  } catch (err) {
+    console.error("Error deleting file:", err);
+    alert("Could not delete the file. Please try again.");
+  }
+};
+
+  const handleDeleteRecording = async (recording: Recording, confirm: boolean) => {
+    const filename = recording.source_file?.split(/[\\/]/).pop() ?? recording.label;
+    await handleDeleteFile(filename, confirm);
+  };
+
+  const deleteAllRecordings = async () => {
+    if (!recordings || recordings.length === 0) { return; }
+
+    if(!window.confirm(`Are you sure you want to delete all recordings?`))
+      return;
+
+    recordings.forEach(async (recording: Recording) => {
+      await handleDeleteRecording(recording,false);
+    });
+  };
+
   const openModal = (key: MetricKey, rect: DOMRect) => setModal({ key, rect });
 
   const R = recordings ?? [];
@@ -422,7 +468,7 @@ export function App() {
               {isRecording ? (
                 <>🔴 Stop Recording ({recordingSeconds}s)</>
               ) : (
-                <>🎙️ Record with Mic</>
+                <>🎙️ Record</>
               )}
             </button>
         </div>
@@ -462,14 +508,46 @@ export function App() {
             >
               {isAnalyzing ? "Analyzing... ⏳" : "Run Analysis 🛠️"}
             </button>
+
+            {recordings && recordings.length > 0 && (
+              <button 
+                onClick={() => deleteAllRecordings()}
+                style={{ padding: "8px 16px", cursor: "pointer", background: "#ff6b6b", color: "#fff", border: "none", borderRadius: "6px", fontWeight: "bold" }}
+              > Delete all Recordings 🗑️
+              </button>
+            )}
           </div>
 
         </div>
 
         {active && (
           <div className="latest-banner">
+            
             🌸 <b>#{active.id}</b> &middot; {active.label} &middot;{" "}
             <span style={{ color: "#9d8ba8" }}>{active.date}</span>
+            {/* The Trashcan Delete Button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation(); // Prevents selecting the file when clicking delete
+                void handleDeleteRecording(active);
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#ff6b6b", // Red accent color for delete actions
+                cursor: "pointer",
+                padding: "6px",
+                borderRadius: "4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "background 0.2s",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255, 107, 107, 0.1)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            >
+              <TrashIcon className="w-5 h-5" />
+            </button>
           </div>
         )}
       </header>
@@ -747,7 +825,7 @@ export function App() {
                 style={{ cursor: "pointer" }}
                 title="click to view this take above"
               >
-                <RecordingCard r={r} />
+                <RecordingCard r={r} onDelete={handleDeleteRecording} />
               </div>
             ))
           )}

@@ -1,7 +1,8 @@
-from datetime import datetime
+﻿from datetime import datetime
 import os
 import subprocess
 import shutil
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -26,45 +27,88 @@ import time
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 
 
+import json
+
 @app.delete("/api/recordings/{filename}")
 async def delete_recording(filename: str):
-    shared_dir = "/app/shared"
-    file_path = os.path.join(shared_dir, filename)
-    
-    # Sicherheitscheck: Verhindert Path Traversal Attacken (z.B. filename="../../etc/passwd")
-    real_path = os.path.abspath(file_path)
-    if not real_path.startswith(os.path.abspath(shared_dir)):
+    base_dir = Path(__file__).resolve().parent
+    shared_dir = base_dir / "shared"
+    recordings_dir = base_dir / "dashboard-react" / "public"
+    root_recordings_path = base_dir / "recordings.json"
+    public_recordings_path = recordings_dir / "recordings.json"
+    analysis_dir = recordings_dir / "analysis"
+
+    file_path = shared_dir / filename
+    real_path = file_path.resolve()
+    shared_root = shared_dir.resolve()
+
+    if shared_root != real_path and shared_root not in real_path.parents:
         raise HTTPException(status_code=400, detail="Ungültiger Dateipfad.")
-        
-    # Prüfen, ob die Datei existiert
-    if not os.path.exists(real_path):
+
+    if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Datei {filename} wurde nicht gefunden.")
-        
-    # Prüfen, ob es sich wirklich um eine Datei handelt (und kein Unterverzeichnis)
-    if not os.path.isfile(real_path):
+
+    if not file_path.is_file():
         raise HTTPException(status_code=400, detail="Der angegebene Pfad ist keine Datei.")
 
     try:
-        os.remove(real_path)
-        print(f"Erfolgreich gelöscht: {filename}", flush=True)
-        return {"status": "success", "message": f"Datei {filename} wurde erfolgreich gelöscht."}
+        file_path.unlink()
+        print(f"Audiodatei erfolgreich gelöscht: {filename}", flush=True)
+
+        json_updated = False
+        removed_details: list[str] = []
+
+        for json_path in [root_recordings_path, public_recordings_path]:
+            if not json_path.exists():
+                continue
+
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    recordings = json.load(f)
+
+                initial_count = len(recordings)
+                removed = [rec for rec in recordings if rec.get("source_file", "").endswith(filename)]
+                recordings = [rec for rec in recordings if not rec.get("source_file", "").endswith(filename)]
+
+                if len(recordings) < initial_count:
+                    json_updated = True
+                    removed_details.extend(str(rec.get("detail", "")) for rec in removed if rec.get("detail"))
+                    with open(json_path, "w", encoding="utf-8") as f:
+                        json.dump(recordings, f, indent=2, ensure_ascii=False)
+                    print(f"Eintrag für {filename} aus {json_path.name} entfernt.", flush=True)
+
+            except Exception as json_err:
+                print(f"Warnung: Fehler beim Aktualisieren von {json_path}: {str(json_err)}", flush=True)
+
+        for detail in removed_details:
+            detail_path = Path(detail)
+            for candidate in [recordings_dir / detail_path, analysis_dir / detail_path.name]:
+                if candidate.exists():
+                    candidate.unlink()
+                    break
+
+        return {
+            "status": "success",
+            "message": f"Datei {filename} gelöscht.",
+            "json_updated": json_updated,
+        }
+
     except Exception as e:
         print(f"Fehler beim Löschen von {filename}: {str(e)}", flush=True)
         raise HTTPException(status_code=500, detail=f"Fehler beim Löschen der Datei: {str(e)}")
-
 
 @app.post("/api/upload-recording")
 async def upload_recording(file: UploadFile = File(...), filename: str = Form(None)):
     shared_dir = "/app/shared"
     timestamp = int(time.time())
 
-    formatted_time = datetime.now().strftime("%H-%M-%S_%d-%m-%Y")
+    formatted_time = datetime.now().astimezone().strftime("%H-%M-%S_%d-%m-%Y")
     
-    # Temporärer Pfad für die Rohdaten des Browsers
+    # TemporÃ¤rer Pfad fÃ¼r die Rohdaten des Browsers
     temp_raw_path = f"/tmp/raw_mic_{timestamp}.tmp"
 
     if filename:
-        # Entferne eventuell mitgesendete Dateiendungen des Nutzers für ein sauberes .mp3
+        # Entferne eventuell mitgesendete Dateiendungen des Nutzers fÃ¼r ein sauberes .mp3
         base_name = os.path.splitext(filename)[0]
         # Bereinige den Namen von unerlaubten Pfad- oder Sonderzeichen
         base_name = "".join(c for c in base_name if c.isalnum() or c in ("-", "_")).strip()
@@ -80,12 +124,12 @@ async def upload_recording(file: UploadFile = File(...), filename: str = Form(No
     final_mp3_path = os.path.join(shared_dir, final_mp3_name)
     
     try:
-        # 1. Empfangene Browser-Daten temporär im Container zwischenspeichern
+        # 1. Empfangene Browser-Daten temporÃ¤r im Container zwischenspeichern
         with open(temp_raw_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
         # 2. Mit dem installierten FFmpeg blitzschnell in echtes MP3 konvertieren
-        # -ac 1 (Mono), -ar 44100 (CD-Qualität), -b:a 128k (gute Kompression)
+        # -ac 1 (Mono), -ar 44100 (CD-QualitÃ¤t), -b:a 128k (gute Kompression)
         ffmpeg_cmd = [
             "ffmpeg", "-y", 
             "-i", temp_raw_path, 
@@ -108,7 +152,7 @@ async def upload_recording(file: UploadFile = File(...), filename: str = Form(No
         raise HTTPException(status_code=500, detail=f"Fehler beim Schreiben: {str(e)}")
     finally:
         await file.close()
-        # Temporäre Datei im Container nach der Konvertierung wieder aufräumen
+        # TemporÃ¤re Datei im Container nach der Konvertierung wieder aufrÃ¤umen
         if os.path.exists(temp_raw_path):
             os.remove(temp_raw_path)
 
@@ -144,7 +188,7 @@ async def list_shared_files():
         return sorted(files)
     except Exception as e:
         print(f"Global directory scan error: {str(e)}")
-        # Statt abzustürzen, geben wir eine leere Liste und den Fehler zurück
+        # Statt abzustÃ¼rzen, geben wir eine leere Liste und den Fehler zurÃ¼ck
         return []
 
 @app.post("/api/analyze")
@@ -153,7 +197,7 @@ async def trigger_analysis(data: AnalyzeRequest):
     
     # Sicherheitscheck: Verhindert Path Traversal Attacken (z.B. filename="../etc/passwd")
     if not os.path.abspath(file_path).startswith("/app/shared/"):
-        raise HTTPException(status_code=400, detail="Ungültiger Dateipfad")
+        raise HTTPException(status_code=400, detail="UngÃ¼ltiger Dateipfad")
         
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail=f"Datei {data.filename} wurde im shared-Ordner nicht gefunden")
@@ -172,3 +216,4 @@ async def trigger_analysis(data: AnalyzeRequest):
         return {"status": "success", "output": result.stdout}
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail=f"Skript-Fehler: {e.stderr}")
+

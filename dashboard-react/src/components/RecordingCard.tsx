@@ -1,8 +1,15 @@
 import type { Recording } from "../types";
 import { fmt } from "../zones";
+import { TrashIcon } from "./icons";
 import { WaveformPlayer } from "./WaveformPlayer";
 
-export function RecordingCard({ r }: { r: Recording }) {
+export function RecordingCard({
+  r,
+  onDelete,
+}: {
+  r: Recording;
+  onDelete?: (recording: Recording) => void;
+}) {
   return (
     <div className="rec">
       <div className="top">
@@ -10,9 +17,34 @@ export function RecordingCard({ r }: { r: Recording }) {
           <span className="num">{r.id}</span>
           <span className="label-txt">{r.label}</span>
         </div>
-        <span className="date">
-          {r.date} · {fmt(r.duration_s, "s")}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="date">
+            {r.date} · {fmt(r.duration_s, "s")}
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete?.(r);
+            }}
+            title={`Delete ${r.label}`}
+            aria-label={`Delete ${r.label}`}
+            style={{
+              background: "#fff6f9",
+              border: "1px solid #f2c6d9",
+              color: "#ff6b6b",
+              cursor: "pointer",
+              padding: "6px",
+              borderRadius: 6,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              lineHeight: 0,
+            }}
+          >
+            <TrashIcon className="w-4 h-4" />
+          </button>
+        </div>
       </div>
       <div className="metrics">
         <div className="chip">
